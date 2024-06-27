@@ -33,7 +33,6 @@ class MergedDataset(Dataset):
             img, label, uq_idx = self.unlabelled_dataset[item - len(self.labelled_dataset)]
             labeled_or_not = 0
 
-
         return img, label, uq_idx, np.array([labeled_or_not])
 
     def __len__(self):

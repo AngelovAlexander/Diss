@@ -6,7 +6,7 @@ cifar_100_root = '${DATASET_DIR}/cifar100'
 cub_root = '${DATASET_DIR}/cub'
 aircraft_root = '${DATASET_DIR}/fgvc-aircraft-2013b'
 car_root = '${DATASET_DIR}/cars'
-herbarium_dataroot = '${DATASET_DIR}/herbarium_19'
+herbarium_dataroot = 'Data/'
 imagenet_root = '${DATASET_DIR}/ImageNet'
 
 # OSR Split dir
