@@ -12,6 +12,7 @@ import pickle
 import os
 
 from config import osr_split_dir
+from functools import partial
 
 
 get_dataset_funcs = {
@@ -25,6 +26,8 @@ get_dataset_funcs = {
     'scars': get_scars_datasets
 }
 
+def target_transform_function(x, target_transform_dict):
+    return target_transform_dict[x]
 
 def get_datasets(dataset_name, train_transform, test_transform, args):
 
@@ -49,7 +52,8 @@ def get_datasets(dataset_name, train_transform, test_transform, args):
     target_transform_dict = {}
     for i, cls in enumerate(list(args.train_classes) + list(args.unlabeled_classes)):
         target_transform_dict[cls] = i
-    target_transform = lambda x: target_transform_dict[x]
+    #target_transform = lambda x: target_transform_dict[x]
+    target_transform = partial(target_transform_function, target_transform_dict=target_transform_dict)
 
     for dataset_name, dataset in datasets.items():
         if dataset is not None:

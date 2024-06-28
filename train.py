@@ -16,9 +16,11 @@ from util.cluster_and_log_utils import log_accs_from_preds
 from config import exp_root
 from model import DINOHead, info_nce_logits, SupConLoss, DistillLoss, ContrastiveLearningViewGenerator, get_params_groups
 from shap_benchmark import shap_benchmark
+import pickle
 
 from PIL import ImageFile
 ImageFile.LOAD_TRUNCATED_IMAGES = True
+
 
 def train(student, train_loader, test_loader, unlabelled_train_loader, args):
     params_groups = get_params_groups(student)
@@ -301,4 +303,10 @@ if __name__ == "__main__":
     # train(model, train_loader, test_loader_labelled, test_loader_unlabelled, args)
     train(model, train_loader, None, test_loader_unlabelled, args)
 
-    shap_benchmark(model, train_dataset, unlabelled_train_examples_test)
+    with open('Data/train_dataset.pt', 'wb') as train_dataset_file:
+        pickle.dump(train_dataset, train_dataset_file, pickle.HIGHEST_PROTOCOL)
+    with open('Data/unlabelled_train_examples_test.pt', 'wb') as unlabelled_train_dataset_file:
+        pickle.dump(unlabelled_train_examples_test, unlabelled_train_dataset_file, pickle.HIGHEST_PROTOCOL)
+    with open('Data/test_dataset.pt', 'wb') as test_dataset_file:
+        pickle.dump(test_dataset, test_dataset_file, pickle.HIGHEST_PROTOCOL)
+    #shap_benchmark(model, train_dataset, unlabelled_train_examples_test)
