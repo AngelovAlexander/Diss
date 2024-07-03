@@ -303,10 +303,10 @@ if __name__ == "__main__":
     # train(model, train_loader, test_loader_labelled, test_loader_unlabelled, args)
     train(model, train_loader, None, test_loader_unlabelled, args)
 
-    with open('Data/train_dataset.pt', 'wb') as train_dataset_file:
+    with open('Data/herbarium19/train_dataset.pt', 'wb') as train_dataset_file:
         pickle.dump(train_dataset, train_dataset_file, pickle.HIGHEST_PROTOCOL)
-    with open('Data/unlabelled_train_examples_test.pt', 'wb') as unlabelled_train_dataset_file:
+    with open('Data/herbarium19/unlabelled_train_examples_test.pt', 'wb') as unlabelled_train_dataset_file:
         pickle.dump(unlabelled_train_examples_test, unlabelled_train_dataset_file, pickle.HIGHEST_PROTOCOL)
-    with open('Data/test_dataset.pt', 'wb') as test_dataset_file:
+    with open('Data/herbarium19/test_dataset.pt', 'wb') as test_dataset_file:
         pickle.dump(test_dataset, test_dataset_file, pickle.HIGHEST_PROTOCOL)
     #shap_benchmark(model, train_dataset, unlabelled_train_examples_test)

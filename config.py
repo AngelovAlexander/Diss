@@ -3,7 +3,7 @@
 # -----------------
 cifar_10_root = '${DATASET_DIR}/cifar10'
 cifar_100_root = '${DATASET_DIR}/cifar100'
-cub_root = '${DATASET_DIR}/cub'
+cub_root = 'Data/'
 aircraft_root = '${DATASET_DIR}/fgvc-aircraft-2013b'
 car_root = '${DATASET_DIR}/cars'
 herbarium_dataroot = 'Data/'

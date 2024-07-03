@@ -12,32 +12,50 @@ import pickle
 from config import osr_split_dir
 from model import DINOHead
 
+def divide_between_classes(dataset):
+    # Groups all images of the same type in a single Tensor
+    classes = {}
+    for data in dataset:
+        if data[1] not in classes:
+            classes[data[1]] = torch.stack(data[0])
+        else:
+            classes[data[1]] = torch.cat([classes.get(data[1]), torch.stack(data[0])])
+    return classes
+
+
 def shap_benchmark(model, train_dataset, test_dataset, plot_name):
-
-    def model_wrapper(images):
-        _, logits = model(images)
-        return logits
-
     model = model.to("cuda")
     output_model = OutputSimGCD(model)
     
-    a = torch.stack(train_dataset[0][0])
-    a = a.to("cuda")
-    a = a.requires_grad_(True)
-    b = a.detach().clone()
+    #a = torch.stack(train_dataset[0][0])
+    #q = torch.stack(train_dataset[1][0])
+    #c = torch.cat([a,q])
+    c = train_dataset[list(train_dataset.keys())[0]][:100]
+    c = c.to("cuda")
+    c = c.requires_grad_(True)
+    #a = a.to("cuda")
+    #a = a.requires_grad_(True)
+    #b = a.detach().clone()
+    #print(c)
+    #print(c.shape)
     output_model.to("cuda")
-    e = shap.DeepExplainer(output_model, a)
-    t_d = b#test_dataset[1][0].unsqueeze(0)
-    t_d = t_d.to("cuda")
-    t_d = t_d.requires_grad_(True)
-    y = t_d.detach().clone()
+    e = shap.DeepExplainer(output_model, c)
+    #t_d_1 = test_dataset[0][0].unsqueeze(0)
+    #t_d_2 = test_dataset[50][0].unsqueeze(0)
+    d = train_dataset[list(train_dataset.keys())[0]][0].unsqueeze(0)
+    d = d.to("cuda")
+    d = d.requires_grad_(True)
+    #t_d = torch.cat([t_d_1,t_d_2])
+    #t_d = t_d.to("cuda")
+    #t_d = t_d.requires_grad_(True)
+    y = d.detach().clone()
     y = y.detach().cpu().numpy()
     y = y.transpose(0,2,3,1)
-    shap_values = e.shap_values(t_d, check_additivity=False)
+    shap_values = e.shap_values(d, check_additivity=False)
     shap_numpy = list(np.transpose(shap_values, (4, 0, 2, 3, 1)))
 
     shap_values = [shap_values[i, 0] for i in range(shap_values.shape[0])]
-    shap.image_plot(shap_values, y[0])
+    shap.image_plot(shap_values, -y[0])
     plt.savefig("results/" + plot_name)
 
 if __name__ == "__main__":
@@ -54,6 +72,7 @@ if __name__ == "__main__":
     feat_dim = 768
     num_mlp_layers = 3
     herb_path_splits = os.path.join(osr_split_dir, 'herbarium_19_class_splits.pkl')
+    #cub_path_splits = os.path.join(osr_split_dir, 'cub_osr_splits.pkl')
 
     with open(herb_path_splits, 'rb') as handle:
         class_splits = pickle.load(handle)
@@ -61,6 +80,8 @@ if __name__ == "__main__":
     train_classes = class_splits['Old']
     unlabeled_classes = class_splits['New']
     mlp_out_dim = len(train_classes) + len(unlabeled_classes)
+    #train_classes = class_splits['known_classes']
+    #unlabeled_classes = class_splits['unknown_classes']
 
     with open(args.train_dataset_path, 'rb') as tr_dataset:
         train_dataset = pickle.load(tr_dataset)
@@ -75,4 +96,5 @@ if __name__ == "__main__":
     model.load_state_dict(state_dict["model"])
     model.eval()
 
-    shap_benchmark(model, train_dataset, test_dataset, args.shap_image_plot_name)
+    train_classes = divide_between_classes(train_dataset)
+    shap_benchmark(model, train_classes, test_dataset, args.shap_image_plot_name)

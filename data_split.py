@@ -25,10 +25,10 @@ if __name__ == "__main__":
     cur_dir_path = os.path.dirname(os.path.realpath(__file__))
 
     create_folder(cur_dir_path + "/Data")
-    create_folder(cur_dir_path + "/Data/small-validation")
-    create_folder(cur_dir_path + "/Data/small-train")
+    create_folder(cur_dir_path + "/Data/herbarium19/small-validation")
+    create_folder(cur_dir_path + "/Data/herbarium19/small-train")
     
     for dir_id in valid_id_subset:
-        shutil.copytree(args.valid_dir + dir_id, cur_dir_path + "/Data/small-validation/" + dir_id, dirs_exist_ok=True)
+        shutil.copytree(args.valid_dir + dir_id, cur_dir_path + "/Data/herbarium19/small-validation/" + dir_id, dirs_exist_ok=True)
         if dir_id in train_id_subset:
-            shutil.copytree(args.train_dir + dir_id, cur_dir_path + "/Data/small-train/" + dir_id, dirs_exist_ok=True)
+            shutil.copytree(args.train_dir + dir_id, cur_dir_path + "/Data/herbarium19/small-train/" + dir_id, dirs_exist_ok=True)
