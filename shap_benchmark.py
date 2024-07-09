@@ -26,11 +26,17 @@ def divide_between_classes(dataset):
 def shap_benchmark(model, train_dataset, test_dataset, plot_name):
     model = model.to("cuda")
     output_model = OutputSimGCD(model)
-    
     #a = torch.stack(train_dataset[0][0])
     #q = torch.stack(train_dataset[1][0])
     #c = torch.cat([a,q])
-    c = train_dataset[list(train_dataset.keys())[0]][:100]
+    c1 = train_dataset[list(train_dataset.keys())[4]][:3]
+    c2 = train_dataset[list(train_dataset.keys())[7]][:3]
+    c3 = train_dataset[list(train_dataset.keys())[18]][:3]
+    c4 = train_dataset[list(train_dataset.keys())[52]][:3]
+    c5 = train_dataset[list(train_dataset.keys())[1]][:3]
+    c6 = train_dataset[list(train_dataset.keys())[63]][:3]
+    c7 = train_dataset[list(train_dataset.keys())[23]][:3]
+    c = torch.cat([c1, c2, c3, c4, c5, c6, c7])
     c = c.to("cuda")
     c = c.requires_grad_(True)
     #a = a.to("cuda")
@@ -42,7 +48,7 @@ def shap_benchmark(model, train_dataset, test_dataset, plot_name):
     e = shap.DeepExplainer(output_model, c)
     #t_d_1 = test_dataset[0][0].unsqueeze(0)
     #t_d_2 = test_dataset[50][0].unsqueeze(0)
-    d = train_dataset[list(train_dataset.keys())[0]][0].unsqueeze(0)
+    d = train_dataset[list(train_dataset.keys())[7]][0].unsqueeze(0)
     d = d.to("cuda")
     d = d.requires_grad_(True)
     #t_d = torch.cat([t_d_1,t_d_2])
@@ -71,20 +77,24 @@ if __name__ == "__main__":
     device = torch.device('cuda:0')
     feat_dim = 768
     num_mlp_layers = 3
-    herb_path_splits = os.path.join(osr_split_dir, 'herbarium_19_class_splits.pkl')
-    #cub_path_splits = os.path.join(osr_split_dir, 'cub_osr_splits.pkl')
+    #herb_path_splits = os.path.join(osr_split_dir, 'herbarium_19_class_splits.pkl')
+    cub_path_splits = os.path.join(osr_split_dir, 'cub_osr_splits.pkl')
 
-    with open(herb_path_splits, 'rb') as handle:
+    with open(cub_path_splits, 'rb') as handle:
         class_splits = pickle.load(handle)
 
-    train_classes = class_splits['Old']
-    unlabeled_classes = class_splits['New']
+    #train_classes = class_splits['Old']
+    #unlabeled_classes = class_splits['New']
+    train_classes = class_splits['known_classes']
+    open_set_classes = class_splits['unknown_classes']
+    unlabeled_classes = open_set_classes['Hard'] + open_set_classes['Medium'] + open_set_classes['Easy']
+    
     mlp_out_dim = len(train_classes) + len(unlabeled_classes)
-    #train_classes = class_splits['known_classes']
-    #unlabeled_classes = class_splits['unknown_classes']
+    
 
     with open(args.train_dataset_path, 'rb') as tr_dataset:
         train_dataset = pickle.load(tr_dataset)
+    
     with open(args.test_dataset_path, 'rb') as test_dataset:
         test_dataset = pickle.load(test_dataset)
 

@@ -14,7 +14,7 @@ from data.get_datasets import get_datasets, get_class_splits
 from util.general_utils import AverageMeter, init_experiment
 from util.cluster_and_log_utils import log_accs_from_preds
 from config import exp_root
-from model import DINOHead, info_nce_logits, SupConLoss, DistillLoss, ContrastiveLearningViewGenerator, get_params_groups
+from model import DINOHead, info_nce_logits, SupConLoss, DistillLoss, ContrastiveLearningViewGenerator, get_params_groups, DINOHeadNew
 from shap_benchmark import shap_benchmark
 import pickle
 
@@ -294,7 +294,7 @@ if __name__ == "__main__":
     # ----------------------
     # PROJECTION HEAD
     # ----------------------
-    projector = DINOHead(in_dim=args.feat_dim, out_dim=args.mlp_out_dim, nlayers=args.num_mlp_layers)
+    projector = DINOHeadNew(in_dim=args.feat_dim, out_dim=args.mlp_out_dim, nlayers=args.num_mlp_layers)
     model = nn.Sequential(backbone, projector).to(device)
 
     # ----------------------
@@ -303,10 +303,10 @@ if __name__ == "__main__":
     # train(model, train_loader, test_loader_labelled, test_loader_unlabelled, args)
     train(model, train_loader, None, test_loader_unlabelled, args)
 
-    with open('Data/herbarium19/train_dataset.pt', 'wb') as train_dataset_file:
+    with open('Data/Cub_new_model/train_dataset.pt', 'wb') as train_dataset_file:
         pickle.dump(train_dataset, train_dataset_file, pickle.HIGHEST_PROTOCOL)
-    with open('Data/herbarium19/unlabelled_train_examples_test.pt', 'wb') as unlabelled_train_dataset_file:
+    with open('Data/Cub_new_model/unlabelled_train_examples_test.pt', 'wb') as unlabelled_train_dataset_file:
         pickle.dump(unlabelled_train_examples_test, unlabelled_train_dataset_file, pickle.HIGHEST_PROTOCOL)
-    with open('Data/herbarium19/test_dataset.pt', 'wb') as test_dataset_file:
+    with open('Data/Cub_new_model/test_dataset.pt', 'wb') as test_dataset_file:
         pickle.dump(test_dataset, test_dataset_file, pickle.HIGHEST_PROTOCOL)
     #shap_benchmark(model, train_dataset, unlabelled_train_examples_test)
