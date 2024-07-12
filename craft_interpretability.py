@@ -14,16 +14,11 @@ import pickle
 from config import osr_split_dir
 from model import DINOHeadNew, LatentToLogitMLP
 from math import ceil
+from shap_benchmark import divide_between_classes
+from PIL import ImageFile
+ImageFile.LOAD_TRUNCATED_IMAGES = True
+from data_split import create_folder
 
-def divide_between_classes(dataset):
-    # Groups all images of the same type in a single Tensor
-    classes = {}
-    for data in dataset:
-        if data[1] not in classes:
-            classes[data[1]] = torch.stack(data[0])
-        else:
-            classes[data[1]] = torch.cat([classes.get(data[1]), torch.stack(data[0])])
-    return classes
 
 def show(img, **kwargs):
     img = np.array(img)
@@ -33,76 +28,57 @@ def show(img, **kwargs):
     img -= img.min();img /= img.max()
     plt.imshow(img, **kwargs); plt.axis('off')
 
-def craft_interpretability(model, train_dataset, test_dataset, plot_name, in_dim, out_dim, norm_last_layer=True):
+def craft_interpretability(model, train_dataset, test_dataset, dataset_name, plot_name, in_dim, out_dim, norm_last_layer=True, patch_size = 64):
     model = model.to("cuda")
-    print(model)
-    output_model = OutputSimGCD(model)
+    class_id = None
     proj = OutputProjSimGCD(model)
-    c1 = train_dataset[list(train_dataset.keys())[4]]
-    c2 = train_dataset[list(train_dataset.keys())[7]]
-    c3 = train_dataset[list(train_dataset.keys())[18]]
-    c4 = train_dataset[list(train_dataset.keys())[52]]
-    c5 = train_dataset[list(train_dataset.keys())[1]]
-    c6 = train_dataset[list(train_dataset.keys())[63]]
-    c7 = train_dataset[list(train_dataset.keys())[23]]
-    c = torch.cat([c1, c2, c3, c4, c5, c6, c7])
-    c = c.to("cuda")
-    c = c.requires_grad_(True)
-    output_model.to("cuda")
-    hidden_dims = [128, 64]
-
-    latent_to_logit_model = LatentToLogitMLP(256, hidden_dims, out_dim)
-    latent_to_logit_model.to("cuda")
-    #h.to("cuda")
-    #last_layer = nn.utils.weight_norm(nn.Linear(in_dim, out_dim, bias=False)) ### Change in_dim as 256
-    #last_layer.weight_g.data.fill_(1)
-    #if norm_last_layer:
-    #    last_layer.weight_g.requires_grad = False
-    #logits = last_layer
-    #logits.to("cuda")
+    last_layer = nn.utils.weight_norm(nn.Linear(256, out_dim, bias=False)) ### Change in_dim as 256
+    last_layer.weight_g.data.fill_(1)
+    if norm_last_layer:
+        last_layer.weight_g.requires_grad = False
+    logits = last_layer
+    logits.to("cuda")
     craft = Craft(input_to_latent=proj,
-              latent_to_logit=latent_to_logit_model,
+              latent_to_logit=logits,
               number_of_concepts=10,
-              patch_size=56,
-              batch_size=56)
-    crops, crops_u, w = craft.fit(c)
+              patch_size=patch_size,
+              batch_size=patch_size)
 
+    dataset_labels = list(train_dataset.keys())
+    if not os.path.isdir("results/craft_train_" + dataset_name):
+        create_folder("results/craft_train_" + dataset_name)
+
+    if not os.path.isdir("results/craft_train_" + dataset_name + "/" + str(patch_size)):
+        create_folder("results/craft_train_" + dataset_name + "/" + str(patch_size))
+
+    for i in range(len(dataset_labels)):
+        class_dataset = train_dataset[dataset_labels[i]]
+        class_dataset = class_dataset.to("cuda")
+        class_dataset = class_dataset.requires_grad_(True)
+
+        crops, crops_u, w = craft.fit(class_dataset)
+        crops = np.moveaxis(crops.detach().cpu().numpy(), 1, -1)
+
+        importances = craft.estimate_importance(class_dataset, class_id=dataset_labels[i])
+        images_u = craft.transform(class_dataset)
+        plt.bar(range(len(importances)), importances)
+        plt.xticks(range(len(importances)))
+        plt.title("Concept Importance")
+        plt.savefig("results/craft_train_" + dataset_name + "/" + str(patch_size) + "/" + plot_name + "_concept_importance_class_" + str(dataset_labels[i]) + ".png")
+        plt.clf()
+
+        most_important_concepts = np.argsort(importances)[::-1][:5]
     
-    crops = np.moveaxis(crops.detach().cpu().numpy(), 1, -1)
+        nb_crops = 10
+        for c_id in most_important_concepts:
 
-    print(crops.shape, crops_u.shape, w.shape)
-
-    print(list(train_dataset.keys())[4])
-    print(c.shape)
-    c1 = c.detach().clone()
-    importances = craft.estimate_importance(c, class_id=list(train_dataset.keys())[4])
-    images_u = craft.transform(c)
-
-    print(images_u.shape)
-
-    #plt.bar(range(len(importances)), importances)
-    #plt.xticks(range(len(importances)))
-    #plt.title("Concept Importance")
-
-    most_important_concepts = np.argsort(importances)[::-1][:5]
-
-    for c_id in most_important_concepts:
-        print("Concept", c_id, " has an importance value of ", importances[c_id])
-    
-    nb_crops = 10
-    for c_id in most_important_concepts:
-
-        best_crops_ids = np.argsort(crops_u[:, c_id])[::-1][:nb_crops]
-        best_crops = crops[best_crops_ids]
-        print("Len")
-        print(len(best_crops))
-        print("Concept", c_id, " has an importance value of ", importances[c_id])
-        for i in range(nb_crops):
-            plt.subplot(ceil(nb_crops/5), 5, i+1)
-            show(best_crops[i])
-        plt.show()
-        print('\n\n')
-    plt.savefig("results/" + plot_name)
+            best_crops_ids = np.argsort(crops_u[:, c_id])[::-1][:nb_crops]
+            best_crops = crops[best_crops_ids]
+            for j in range(nb_crops):
+                plt.subplot(ceil(nb_crops/5), 5, j+1)
+                show(best_crops[j])
+            plt.savefig("results/craft_train_" + dataset_name + "/" + str(patch_size) + "/" + plot_name + "_concept_" + str(c_id) + "_class_" + str(dataset_labels[i]) + ".png")
+            plt.clf()   
 
 if __name__ == "__main__":
 
@@ -112,22 +88,32 @@ if __name__ == "__main__":
     parser.add_argument('--test_dataset_path', type=str)
     parser.add_argument('--save_shap_values_path', type=str)
     parser.add_argument('--shap_image_plot_name', type=str)
+    parser.add_argument('--dataset_name', default="herb", type=str)
+    parser.add_argument('--patch_size', default=64, type=int)
     args = parser.parse_args()
 
     device = torch.device('cuda:0')
     feat_dim = 768
     num_mlp_layers = 3
-    #herb_path_splits = os.path.join(osr_split_dir, 'herbarium_19_class_splits.pkl')
-    cub_path_splits = os.path.join(osr_split_dir, 'cub_osr_splits.pkl')
+    if args.dataset_name == "herb":
+        path_splits = os.path.join(osr_split_dir, 'herbarium_19_class_splits.pkl')
+    elif args.dataset_name == "cub":
+        path_splits = os.path.join(osr_split_dir, 'cub_osr_splits.pkl')
+    else:
+        raise NotImplementedError
 
-    with open(cub_path_splits, 'rb') as handle:
+    with open(path_splits, 'rb') as handle:
         class_splits = pickle.load(handle)
 
-    #train_classes = class_splits['Old']
-    #unlabeled_classes = class_splits['New']
-    train_classes = class_splits['known_classes']
-    open_set_classes = class_splits['unknown_classes']
-    unlabeled_classes = open_set_classes['Hard'] + open_set_classes['Medium'] + open_set_classes['Easy']
+    if args.dataset_name == "herb":
+        train_classes = class_splits['Old']
+        unlabeled_classes = class_splits['New']
+    elif args.dataset_name == "cub":
+        train_classes = class_splits['known_classes']
+        open_set_classes = class_splits['unknown_classes']
+        unlabeled_classes = open_set_classes['Hard'] + open_set_classes['Medium'] + open_set_classes['Easy']
+    else:
+        raise NotImplementedError
     
     mlp_out_dim = len(train_classes) + len(unlabeled_classes)
     
@@ -147,4 +133,5 @@ if __name__ == "__main__":
     model.eval()
 
     train_classes = divide_between_classes(train_dataset)
-    craft_interpretability(model, train_classes, test_dataset, args.shap_image_plot_name, feat_dim, mlp_out_dim)
+    test_classes = divide_between_classes(test_dataset)
+    craft_interpretability(model, train_classes, test_classes, args.dataset_name, args.shap_image_plot_name, feat_dim, mlp_out_dim, args.patch_size)
