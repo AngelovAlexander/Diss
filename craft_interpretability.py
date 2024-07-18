@@ -4,6 +4,7 @@ import argparse
 import os
 import numpy as np
 import shap
+import cv2
 import torch
 import torchvision
 import torch.nn as nn
@@ -28,6 +29,127 @@ def show(img, **kwargs):
     img -= img.min();img /= img.max()
     plt.imshow(img, **kwargs); plt.axis('off')
 
+from matplotlib.colors import ListedColormap
+import matplotlib
+import colorsys
+
+def get_alpha_cmap(cmap):
+    if isinstance(cmap, str):
+        cmap = plt.get_cmap(cmap)
+    else:
+        c = np.array((cmap[0]/255.0, cmap[1]/255.0, cmap[2]/255.0))
+
+        cmax = colorsys.rgb_to_hls(*c)
+        cmax = np.array(cmax)
+        cmax[-1] = 1.0
+
+        cmax = np.clip(np.array(colorsys.hls_to_rgb(*cmax)), 0, 1)
+        cmap = matplotlib.colors.LinearSegmentedColormap.from_list("", [c,cmax])
+
+    alpha_cmap = cmap(np.arange(256))
+    alpha_cmap[:,-1] = np.linspace(0, 0.85, 256)
+    alpha_cmap = ListedColormap(alpha_cmap)
+
+    return alpha_cmap
+
+def plot_legend(cmaps, most_important_concepts, crops, crops_u):
+  for i, c_id in enumerate(most_important_concepts):
+    cmap = cmaps[i]
+    plt.subplot(1, len(most_important_concepts), i+1)
+
+    best_crops_id = np.argsort(crops_u[:, c_id])[::-1][0]
+    best_crop = crops[best_crops_id]
+
+    p = 5
+    mask = np.zeros(best_crop.shape[:-1])
+    mask[:p, :] = 1.0
+    mask[:, :p] = 1.0
+    mask[-p:, :] = 1.0
+    mask[:, -p:] = 1.0
+
+    show(best_crop)
+    show(mask, cmap=cmap)
+    plt.title(f"{c_id}", color=cmap(1.0))
+
+    plt.show()
+
+def concept_attribution_maps(images_preprocessed, images_u, cmaps, most_important_concepts, id, percentile=30):
+    img = images_preprocessed[id]
+    #n = images_preprocessed.shape[0]
+    #r = images_u.shape[1]
+    #w = h = int(np.sqrt(images_u.shape[0] // n))
+    #print(n, r, w, h)
+    #images_u = images_u.reshape((n,w,h,r))
+    u = images_u[id]
+    #print(u.shape)
+    img = img.detach().cpu().numpy()
+    #print("Shape ", img.shape)
+
+    show(img)
+
+    for i, c_id in enumerate(most_important_concepts):
+
+        cmap = cmaps[i]
+        heatmap = u[c_id]
+        print("Heatmap ", heatmap)
+
+        # only show concept if excess N-th percentile
+        sigma = np.percentile(images_u[:,c_id].flatten(), percentile)
+        print(sigma)
+        heatmap = heatmap * np.array(heatmap > sigma, np.float32)
+
+        heatmap_reshaped = np.full((img.shape[1], img.shape[2]), heatmap)
+        #heatmap = cv2.resize(heatmap, (224, 224))
+        show(heatmap_reshaped, cmap=cmap, alpha=0.7)
+
+    plt.show()
+
+def concept_attribution_maps2(images_preprocessed, images_u, cmaps, most_important_concepts, id, percentile=90):
+    img = images_preprocessed[id]
+    u = images_u[id]  # u is 1-dimensional for each image
+
+    # Get image dimensions
+    _, height, width = img.shape
+
+    plt.figure(figsize=(12, 6))
+    
+    # Original Image
+    plt.subplot(1, 2, 1)
+    plt.imshow(np.transpose(img.detach().cpu().numpy(), (1, 2, 0)))
+    plt.title("Original Image")
+    plt.axis('off')
+
+    # Concept Attribution Map
+    plt.subplot(1, 2, 2)
+    plt.imshow(np.transpose(img.detach().cpu().numpy(), (1, 2, 0)))
+    plt.title("Concept Attribution Map")
+
+    combined_heatmap = np.zeros((height, width))
+
+    for i, c_id in enumerate(most_important_concepts):
+        concept_importance = u[c_id]
+
+        # only show concept if excess N-th percentile
+        sigma = np.percentile(images_u[:, c_id], percentile)
+        if concept_importance > sigma:
+            # Create a heatmap for this concept
+            heatmap = np.full((height, width), concept_importance)
+            combined_heatmap += heatmap
+
+    # Normalize the combined heatmap
+    if combined_heatmap.max() > 0:
+        combined_heatmap = combined_heatmap / combined_heatmap.max()
+
+    # Apply colormap
+    heatmap_colored = plt.cm.jet(combined_heatmap)
+    heatmap_colored[..., 3] = combined_heatmap * 0.5  # Adjust alpha
+
+    plt.imshow(heatmap_colored)
+    plt.axis('off')
+
+    plt.tight_layout()
+    plt.show()
+
 def craft_interpretability(model, train_dataset, test_dataset, dataset_name, plot_name, in_dim, out_dim, norm_last_layer=True, patch_size = 64):
     model = model.to("cuda")
     class_id = None
@@ -44,7 +166,7 @@ def craft_interpretability(model, train_dataset, test_dataset, dataset_name, plo
               patch_size=patch_size,
               batch_size=patch_size)
 
-    dataset_labels = list(train_dataset.keys())
+    dataset_labels = list(train_dataset.keys())[:1]
     if not os.path.isdir("results/craft_train_" + dataset_name):
         create_folder("results/craft_train_" + dataset_name)
 
@@ -78,7 +200,29 @@ def craft_interpretability(model, train_dataset, test_dataset, dataset_name, plo
                 plt.subplot(ceil(nb_crops/5), 5, j+1)
                 show(best_crops[j])
             plt.savefig("results/craft_train_" + dataset_name + "/" + str(patch_size) + "/" + plot_name + "_concept_" + str(c_id) + "_class_" + str(dataset_labels[i]) + ".png")
-            plt.clf()   
+            plt.clf()
+    
+    cmaps = [
+        get_alpha_cmap((54, 197, 240)),
+        get_alpha_cmap((210, 40, 95)),
+        get_alpha_cmap((236, 178, 46)),
+        get_alpha_cmap((15, 157, 88)),
+        get_alpha_cmap((84, 25, 85))
+    ]
+    plot_legend(cmaps, most_important_concepts, crops, crops_u)
+    plt.savefig("results/craft_train_" + dataset_name + "/" + str(patch_size) + "/" + plot_name + "_legend_" + str(dataset_labels[i]) + ".png")
+    plt.clf()
+    concept_attribution_maps2(class_dataset, images_u, cmaps, most_important_concepts, 0)
+    plt.show()
+    plt.savefig("results/craft_train_" + dataset_name + "/" + str(patch_size) + "/" + plot_name + "_map0_" + str(dataset_labels[i]) + ".png")
+    plt.clf()
+    concept_attribution_maps2(class_dataset, images_u, cmaps, most_important_concepts, 1)
+    plt.show()
+    plt.savefig("results/craft_train_" + dataset_name + "/" + str(patch_size) + "/" + plot_name + "_map1_" + str(dataset_labels[i]) + ".png")
+    plt.clf()
+    concept_attribution_maps2(class_dataset, images_u, cmaps, most_important_concepts, 2)
+    plt.savefig("results/craft_train_" + dataset_name + "/" + str(patch_size) + "/" + plot_name + "_map2_" + str(dataset_labels[i]) + ".png")
+    plt.clf()
 
 if __name__ == "__main__":
 
@@ -129,8 +273,13 @@ if __name__ == "__main__":
     model = nn.Sequential(backbone, projector).to(device)
 
     state_dict = torch.load(args.model_path)
+    
     model.load_state_dict(state_dict["model"])
     model.eval()
+    print(state_dict.keys())
+    for a,b in model.named_parameters():
+        print(a)
+    
 
     train_classes = divide_between_classes(train_dataset)
     test_classes = divide_between_classes(test_dataset)
