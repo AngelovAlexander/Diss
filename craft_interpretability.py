@@ -21,13 +21,16 @@ ImageFile.LOAD_TRUNCATED_IMAGES = True
 from data_split import create_folder
 
 
-def show(img, **kwargs):
+def show(img, ax = None, **kwargs):
     img = np.array(img)
     if img.shape[0] == 3:
         img = img.transpose(1, 2, 0)
 
     img -= img.min();img /= img.max()
-    plt.imshow(img, **kwargs); plt.axis('off')
+    if ax:
+      ax.imshow(img, **kwargs); ax.axis('off')
+    else:
+      plt.imshow(img, **kwargs); plt.axis('off')
 
 from matplotlib.colors import ListedColormap
 import matplotlib
