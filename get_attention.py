@@ -17,6 +17,8 @@ import pickle
 from evaluate_attention import *
 from itertools import combinations
 from data_split import create_folder
+from model import PatchClassifier
+import torch.nn.functional as F
 
 def prepare_attention_map(attn_weights, image_shape):
     average_attention = attn_weights.mean(dim=1) # Result is 197x197
@@ -29,7 +31,7 @@ def prepare_attention_map(attn_weights, image_shape):
     attention_map_resized = (attention_map_resized - attention_map_resized.min()) / (attention_map_resized.max() - attention_map_resized.min())
     return attention_map_resized
 
-def visualize_attention(image, attn_weights, id, class_idx):
+def visualize_individual_attention(image, attn_weights, id, class_idx):
     image = np.transpose(image, (1, 2, 0))
 
     #with open('results/craft_train_herb/try/attn_map_before_norm.pt', 'wb') as attn_map:
@@ -80,10 +82,7 @@ def visualize_attention_patch(image, attention_maps, layer_idx):
     
     # Resize attention map to match the image size
     attn_map = np.array(to_pil_image(attn_map.unsqueeze(0)))
-    attn_map = Image.fromarray(attn_map).resize(
-        (244, 244),
-        resample=Image.BILINEAR
-    )
+    attn_map = Image.fromarray(attn_map).resize((244, 244),resample=Image.BILINEAR)
     attn_map = np.array(attn_map)
     
     # Plot image and overlay attention heatmap
@@ -97,6 +96,72 @@ def visualize_attention_patch(image, attention_maps, layer_idx):
     plt.savefig("results/attention_special2_" + str(layer_idx) + ".png")
     plt.clf()
 
+def embed_patches_with_attention(train_classes, visualize=False):
+    dataset_labels = list(train_classes.keys())
+    print("Label")
+    print(dataset_labels[0])
+
+    print("random_padding")
+    
+    images = train_classes[dataset_labels[0]]#dataset_labels[9]]#torch.stack(train_dataset[0][0])
+    #images = torch.stack(train_dataset[0][0])
+    images = images.to("cuda")
+    images = images.requires_grad_(True)
+
+    attention_outputs = []
+    cur_id = 0
+    #constraints = []
+    all_patches = []
+    embeddings = []
+
+    idx = 0
+
+    with torch.no_grad():
+        _ = model(images)
+        for img in images:
+            attn_weights = model[0].get_last_selfattention(img.unsqueeze(0))
+            attention_outputs.append(attn_weights)
+    
+            img = img.detach().cpu().numpy()
+            attn_map = prepare_attention_map(attn_weights, img.shape)
+            if visualize:
+                visualize_individual_attention(img, attn_map, idx, dataset_labels[0])
+            idx += 1
+            
+            patches = get_attended_patches(img, attn_map, threshold = 0.4, modification_type="static_padding", visualize = False)
+            print(patches.shape)
+            all_patches.append(patches)
+            #print(np.vstack(patches).shape)
+            #cur_img_embeddings = create_embeddings(patches)
+            #constraints.extend(list(combinations(np.arange(cur_id, cur_id + cur_img_embeddings.shape[0]), 2)))
+            #cur_id += cur_img_embeddings.shape[0]
+            #print(cur_img_embeddings.shape)
+            #embeddings.append(cur_img_embeddings)
+    all_patches = np.vstack(all_patches)
+    return all_patches
+    """
+    print(constraints)
+    print(cur_id)
+    embeddings = np.vstack(embeddings)
+    print(embeddings.shape)
+
+    labels = optimised_CoExDBSCAN(embeddings, eps=0.25, min_samples = 2, cannot_link_constraints = constraints)
+    print(labels.shape)
+    visualize_clusters(embeddings, labels)
+    print(f"Number of clusters: {len(set(labels)) - (1 if -1 in labels else 0)}")
+    print(f"Number of noise points: {np.sum(labels == -1)}")
+    ev = evaluate_optimised_CoExDBSCAN(embeddings, labels)
+    print(ev)
+    ev = evaluate_optimised_CoExDBSCAN(embeddings, labels, metric = "davies_bouldin_score")
+    print(ev)"""
+
+def classify_patches(model, patches):
+    model.eval()
+    with torch.no_grad():
+        logits = model(patches)
+        probabilities = F.softmax(logits, dim=1)
+        _, predicted = torch.max(probabilities, 1)
+    return predicted#[model.class_names[idx] for idx in predicted]
 
 if __name__ == "__main__":
 
@@ -147,65 +212,12 @@ if __name__ == "__main__":
     
     model.load_state_dict(state_dict["model"])
     model.eval()
-
     train_classes = divide_between_classes(train_dataset)
-    dataset_labels = list(train_classes.keys())
-    print(dataset_labels[9])
-    #if dataset_labels[9] in labeled_classes:
-    #    print("labeled")
-    #else:
-    #    if dataset_labels[9] in open_set_classes['Hard']:
-    #        print("Hard")
-    #    elif dataset_labels[9] in open_set_classes['Medium']:
-    #        print("Medium")
-    #    else:
-    #        print("Easy")
-    
-    images = train_classes[unlabeled_classes[0]]#dataset_labels[9]]#torch.stack(train_dataset[0][0])
-    #images = torch.stack(train_dataset[0][0])
-    images = images.to("cuda")
-    images = images.requires_grad_(True)
-
-    attention_outputs = []
-    cur_id = 0
-    constraints = []
-    embeddings = []
-
-    idx = 0
-    # Run inference
-    with torch.no_grad():
-        _ = model(images)
-        for img in images:
-            attn_weights = model[0].get_last_selfattention(img.unsqueeze(0))
-            attention_outputs.append(attn_weights)
-
-            #visualize_attention_patch(image[0], attention_outputs, layer_idx=56)
-    
-            img = img.detach().cpu().numpy()
-            attn_map = prepare_attention_map(attn_weights, img.shape)
-            visualize_attention(img, attn_map, idx, unlabeled_classes[0])
-            idx += 1
-            """
-            patches = get_attended_patches(img, attn_map, threshold = 0.4, visualize = True)
-            cur_img_embeddings = create_embeddings(patches)
-            constraints.extend(list(combinations(np.arange(cur_id, cur_id + cur_img_embeddings.shape[0]), 2)))
-            cur_id += cur_img_embeddings.shape[0]
-            print(cur_img_embeddings.shape)
-            embeddings.append(cur_img_embeddings)"""
-            #if idx > 2:
-            #    break
-    """
-    print(constraints)
-    print(cur_id)
-    embeddings = np.vstack(embeddings)
-    print(embeddings.shape)
-
-    labels = optimised_CoExDBSCAN(embeddings, eps=0.25, min_samples = 2, cannot_link_constraints = constraints)
-    print(labels.shape)
-    visualize_clusters(embeddings, labels)
-    print(f"Number of clusters: {len(set(labels)) - (1 if -1 in labels else 0)}")
-    print(f"Number of noise points: {np.sum(labels == -1)}")
-    ev = evaluate_optimised_CoExDBSCAN(embeddings, labels)
-    print(ev)
-    ev = evaluate_optimised_CoExDBSCAN(embeddings, labels, metric = "davies_bouldin_score")
-    print(ev)"""
+    patches = embed_patches_with_attention(train_classes)
+    print(patches.shape)
+    patch_classifier = PatchClassifier(model)
+    patches = torch.from_numpy(np.transpose(patches, (0, 3, 1, 2)))
+    patches = patches.to("cuda")
+    patches = patches.requires_grad_(True)
+    results = classify_patches(patch_classifier, patches)
+    print(results)

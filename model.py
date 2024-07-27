@@ -43,7 +43,7 @@ class DINOHead(nn.Module):
 
 class DINOHeadNew(nn.Module):
     def __init__(self, in_dim, out_dim, use_bn=False, norm_last_layer=True, 
-                 nlayers=3, hidden_dim=2048, bottleneck_dim=256):
+                 nlayers=3, hidden_dim=2048, bottleneck_dim=256, num_heads=12, qkv_bias=False, qk_scale=None, attn_drop=0., drop=0.):
         super().__init__()
         nlayers = max(nlayers, 1)
         if nlayers == 1:
@@ -79,6 +79,21 @@ class DINOHeadNew(nn.Module):
         # x = x.detach()
         logits = self.last_layer(x)
         return x_proj, logits
+
+class PatchClassifier(nn.Module):
+    def __init__(self, pretrained_model):
+        super().__init__()
+        
+        self.model = pretrained_model
+
+        # Freeze all weights
+        for param in self.parameters():
+            param.requires_grad = False
+
+    def forward(self, x):
+        with torch.no_grad():
+            _, logits = self.model(x)
+        return logits
 
 class LatentToLogitMLP(nn.Module):
     def __init__(self, input_dim, hidden_dims, output_dim):
@@ -197,7 +212,6 @@ class SupConLoss(torch.nn.Module):
         loss = loss.view(anchor_count, batch_size).mean()
 
         return loss
-
 
 
 def info_nce_logits(features, n_views=2, temperature=1.0, device='cuda'):

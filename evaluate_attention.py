@@ -6,6 +6,7 @@ from craft_interpretability import show
 from sklearn.neighbors import NearestNeighbors
 from collections import defaultdict
 from sklearn.metrics import silhouette_score, davies_bouldin_score
+import cv2
 
 # Class that creates partial functionality of a constrained set
 class ConstraintSet:
@@ -94,7 +95,9 @@ def counts_per_attention_interval(arr):
     counts, _ = np.histogram(arr, bins)
     return counts
 
-def get_attended_patches(image, attn, threshold = 0.4, visualize = False):
+def get_attended_patches(image, attn, threshold = 0.4, modification_type="random_padding", visualize = False):
+    if modification_type not in ["resize", "static_padding", "random_padding"]:
+        raise Exception("The modification type needs to be resize, static_padding or random_padding!")
     image = np.transpose(image, (1, 2, 0))
     mask = attn > threshold
     # Label the clusters
@@ -107,6 +110,8 @@ def get_attended_patches(image, attn, threshold = 0.4, visualize = False):
         show(image, cmap=cmap)
 
     patches = []
+    mean_dict = {}
+
 
     # Loop through each cluster and find bounding boxes
     for cluster_num in range(1, num_features + 1):
@@ -116,9 +121,32 @@ def get_attended_patches(image, attn, threshold = 0.4, visualize = False):
         y_min, x_min = coords.min(axis=0)
         y_max, x_max = coords.max(axis=0)
 
-        # Extract the patch
-        patch = image[y_min:y_max+1, x_min:x_max+1]
-        patches.append(patch)
+        # Normalize the image to be in the range [0,1] and extract the patch
+        image -= image.min()
+        image /= image.max()
+        small_patch = image[y_min:y_max+1, x_min:x_max+1]
+        # Getting the mean of the 16 most attended pixels
+        # Used for ranking patches
+        mean = np.mean(np.sort(small_patch.flatten())[-16:])
+        if modification_type == "resize":
+            patch = cv2.resize(small_patch, (224,224), interpolation=cv2.INTER_LINEAR)
+        elif modification_type == "static_padding":
+            patch = np.zeros_like(image)
+            patch[y_min:y_max+1, x_min:x_max+1] = small_patch
+        else:
+            patch = np.zeros_like(image)
+            y_start = np.random.randint(0, patch.shape[0] - small_patch.shape[0] + 1)
+            x_start = np.random.randint(0, patch.shape[1] - small_patch.shape[1] + 1)
+
+            patch[y_start:y_start+small_patch.shape[0], x_start:x_start+small_patch.shape[1]] = small_patch
+        if num_features > 5:
+            if mean in mean_dict:
+                mean_dict[mean] = np.vstack([mean_dict[mean], np.expand_dims(patch, axis = 0)])
+            else:
+                mean_dict[mean] = np.expand_dims(patch, axis = 0)
+        else:
+            patches.append(np.expand_dims(patch, axis = 0))
+        
 
         if visualize:
             # Draw rectangle around each cluster
@@ -131,6 +159,17 @@ def get_attended_patches(image, attn, threshold = 0.4, visualize = False):
         plt.show()
         plt.savefig("results/attention_with_patches.png")
         plt.clf()
+    sorted_means = sorted(mean_dict.keys())
+    # Just using the top 5 most attended patches per image
+    available_patches = 5
+    if num_features > 5:
+        while available_patches > 0:
+            cur_patch = mean_dict[sorted_means.pop(-1)]
+            if available_patches - cur_patch.shape[0] < 0:
+                patches.append(cur_patch[:available_patches])
+            patches.append(cur_patch)
+            available_patches -= cur_patch.shape[0]
+    patches = np.vstack(patches)
     return patches
 
 def plot_patches(patches):
