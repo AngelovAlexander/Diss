@@ -94,11 +94,9 @@ def concept_attribution_maps(images_preprocessed, images_u, cmaps, most_importan
 
         cmap = cmaps[i]
         heatmap = u[c_id]
-        print("Heatmap ", heatmap)
 
         # only show concept if excess N-th percentile
         sigma = np.percentile(images_u[:,c_id].flatten(), percentile)
-        print(sigma)
         heatmap = heatmap * np.array(heatmap > sigma, np.float32)
 
         heatmap_reshaped = np.full((img.shape[1], img.shape[2]), heatmap)
@@ -169,7 +167,7 @@ def craft_interpretability(model, train_dataset, test_dataset, dataset_name, plo
               patch_size=patch_size,
               batch_size=patch_size)
 
-    dataset_labels = list(train_dataset.keys())[:1]
+    dataset_labels = list(train_dataset.keys())#[:1]
     if not os.path.isdir("results/craft_train_" + dataset_name):
         create_folder("results/craft_train_" + dataset_name)
 

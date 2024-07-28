@@ -17,8 +17,10 @@ import pickle
 from evaluate_attention import *
 from itertools import combinations
 from data_split import create_folder
-from model import PatchClassifier
+from model import PatchClassifier, get_params_groups
 import torch.nn.functional as F
+from sklearn.metrics.pairwise import cosine_similarity
+from torch.optim import SGD
 
 def prepare_attention_map(attn_weights, image_shape):
     average_attention = attn_weights.mean(dim=1) # Result is 197x197
@@ -98,47 +100,67 @@ def visualize_attention_patch(image, attention_maps, layer_idx):
 
 def embed_patches_with_attention(train_classes, visualize=False):
     dataset_labels = list(train_classes.keys())
+    one_shot_train_data = []
+    one_shot_train_label = []
     print("Label")
     print(dataset_labels[0])
 
     print("random_padding")
-    
-    images = train_classes[dataset_labels[0]]#dataset_labels[9]]#torch.stack(train_dataset[0][0])
-    #images = torch.stack(train_dataset[0][0])
-    images = images.to("cuda")
-    images = images.requires_grad_(True)
-
-    attention_outputs = []
-    cur_id = 0
-    #constraints = []
     all_patches = []
-    embeddings = []
+    all_labels = []
+    for i in range(len(dataset_labels)):
+        images = train_classes[dataset_labels[i]]#dataset_labels[9]]#torch.stack(train_dataset[0][0])
+        #images = torch.stack(train_dataset[0][0])
+        images = images.to("cuda")
+        images = images.requires_grad_(True)
 
-    idx = 0
+        attention_outputs = []
+        cur_id = 0
+        #constraints = []
+        all_patches_per_class = []
+        embeddings = []
 
-    with torch.no_grad():
-        _ = model(images)
-        for img in images:
-            attn_weights = model[0].get_last_selfattention(img.unsqueeze(0))
-            attention_outputs.append(attn_weights)
-    
-            img = img.detach().cpu().numpy()
-            attn_map = prepare_attention_map(attn_weights, img.shape)
-            if visualize:
-                visualize_individual_attention(img, attn_map, idx, dataset_labels[0])
-            idx += 1
-            
-            patches = get_attended_patches(img, attn_map, threshold = 0.4, modification_type="static_padding", visualize = False)
-            print(patches.shape)
-            all_patches.append(patches)
-            #print(np.vstack(patches).shape)
-            #cur_img_embeddings = create_embeddings(patches)
-            #constraints.extend(list(combinations(np.arange(cur_id, cur_id + cur_img_embeddings.shape[0]), 2)))
-            #cur_id += cur_img_embeddings.shape[0]
-            #print(cur_img_embeddings.shape)
-            #embeddings.append(cur_img_embeddings)
-    all_patches = np.vstack(all_patches)
-    return all_patches
+        idx = 0
+
+        with torch.no_grad():
+            _ = model(images)
+            for img in images:
+                attn_weights = model[0].get_last_selfattention(img.unsqueeze(0))
+                attention_outputs.append(attn_weights)
+        
+                img = img.detach().cpu().numpy()
+                attn_map = prepare_attention_map(attn_weights, img.shape)
+                if visualize:
+                    visualize_individual_attention(img, attn_map, idx, dataset_labels[i])
+                idx += 1
+                
+                patches = get_attended_patches(img, attn_map, threshold = 0.4, modification_type="static_padding", visualize = False)
+                all_patches_per_class.append(patches)
+                #print(np.vstack(patches).shape)
+                #cur_img_embeddings = create_embeddings(patches)
+                #constraints.extend(list(combinations(np.arange(cur_id, cur_id + cur_img_embeddings.shape[0]), 2)))
+                #cur_id += cur_img_embeddings.shape[0]
+                #print(cur_img_embeddings.shape)
+                #embeddings.append(cur_img_embeddings)
+        all_patches_per_class = np.vstack(all_patches_per_class)
+        #print(all_patches_per_class.shape)
+        random_idx = np.random.randint(all_patches_per_class.shape[0])
+        # Extract randomly one sample per class for training the 1 shot patch learning
+        one_shot_train_data.append(np.expand_dims(all_patches_per_class[random_idx], axis=0))
+        one_shot_train_label.append(dataset_labels[i])
+        all_patches_per_class = np.delete(all_patches_per_class, random_idx, axis=0)
+        #print(all_patches_per_class.shape)
+        all_patches.append(all_patches_per_class)
+        all_labels.append(np.full(all_patches_per_class.shape[0], dataset_labels[i]).flatten())
+    # Converting them into arrays
+    for p in all_patches:
+        print(p.shape)
+    all_patches = np.concatenate(all_patches, axis=0)
+    all_labels = np.concatenate(all_labels, axis=0)
+    one_shot_train_data = np.vstack(one_shot_train_data)
+    one_shot_train_label = np.array(one_shot_train_label)
+    print(all_patches.shape, all_labels.shape, one_shot_train_data.shape, one_shot_train_label.shape)
+    return all_patches, all_labels, one_shot_train_data, one_shot_train_label
     """
     print(constraints)
     print(cur_id)
@@ -159,6 +181,9 @@ def classify_patches(model, patches):
     model.eval()
     with torch.no_grad():
         logits = model(patches)
+        print(logits)
+        logits2 = logits.argmax(1).cpu().numpy()
+        print(logits2)
         probabilities = F.softmax(logits, dim=1)
         _, predicted = torch.max(probabilities, 1)
     return predicted#[model.class_names[idx] for idx in predicted]
@@ -173,6 +198,9 @@ if __name__ == "__main__":
     parser.add_argument('--shap_image_plot_name', type=str)
     parser.add_argument('--dataset_name', default="herb", type=str)
     parser.add_argument('--patch_size', default=64, type=int)
+    parser.add_argument('--lr', type=float, default=0.1)
+    parser.add_argument('--momentum', type=float, default=0.9)
+    parser.add_argument('--weight_decay', type=float, default=1e-4)
     args = parser.parse_args()
 
     device = torch.device('cuda:0')
@@ -213,11 +241,38 @@ if __name__ == "__main__":
     model.load_state_dict(state_dict["model"])
     model.eval()
     train_classes = divide_between_classes(train_dataset)
-    patches = embed_patches_with_attention(train_classes)
-    print(patches.shape)
+    all_patches, all_labels, one_shot_train_data, one_shot_train_label = embed_patches_with_attention(train_classes)
     patch_classifier = PatchClassifier(model)
+    #preds = []
+    patch_classifier.train()
+    params_groups = get_params_groups(patch_classifier)
+    optimizer = SGD(params_groups, lr=args.lr, momentum=args.momentum, weight_decay=args.weight_decay)
+    print("Test")
+    print(one_shot_train_data.shape[0])
+    img = one_shot_train_data
+    img = torch.from_numpy(img)
+    img = torch.from_numpy(np.transpose(img, (0, 3, 1, 2)))
+    img = img.cuda(non_blocking=True)
+    with torch.no_grad():
+        logits = patch_classifier(img)
+        loss = torch.nn.CrossEntropyLoss()(logits.argmax(1).cpu().numpy().item(), one_shot_train_label)
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+        
+
+    logits = patch_classifier(all_patches)
+    predicted_labels = logits.argmax(1).cpu().numpy()
+    correct = 0
+    for i in range(all_labels.shape[0]):
+        if predicted_labels[i] == all_labels[i]:
+            correct += 1
+    print(correct)
+    print(correct/all_labels.shape[0])
+    #print(patches.shape)
+    """
     patches = torch.from_numpy(np.transpose(patches, (0, 3, 1, 2)))
     patches = patches.to("cuda")
     patches = patches.requires_grad_(True)
     results = classify_patches(patch_classifier, patches)
-    print(results)
+    print(results)"""

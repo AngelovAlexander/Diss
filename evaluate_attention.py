@@ -131,10 +131,10 @@ def get_attended_patches(image, attn, threshold = 0.4, modification_type="random
         if modification_type == "resize":
             patch = cv2.resize(small_patch, (224,224), interpolation=cv2.INTER_LINEAR)
         elif modification_type == "static_padding":
-            patch = np.zeros_like(image)
+            patch = np.ones_like(image)
             patch[y_min:y_max+1, x_min:x_max+1] = small_patch
         else:
-            patch = np.zeros_like(image)
+            patch = np.ones_like(image)
             y_start = np.random.randint(0, patch.shape[0] - small_patch.shape[0] + 1)
             x_start = np.random.randint(0, patch.shape[1] - small_patch.shape[1] + 1)
 
