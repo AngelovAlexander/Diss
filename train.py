@@ -231,6 +231,8 @@ if __name__ == "__main__":
     args.crop_pct = 0.875
 
     backbone = torch.hub.load('facebookresearch/dino:main', 'dino_vitb16')
+    #for a in dict(backbone.named_parameters()).keys:
+    #    print(a)
 
     if args.warmup_model_dir is not None:
         args.logger.info(f'Loading weights from {args.warmup_model_dir}')
@@ -257,7 +259,6 @@ if __name__ == "__main__":
 
     
     args.logger.info('model build')
-
     # --------------------
     # CONTRASTIVE TRANSFORM
     # --------------------
@@ -303,10 +304,10 @@ if __name__ == "__main__":
     # train(model, train_loader, test_loader_labelled, test_loader_unlabelled, args)
     train(model, train_loader, None, test_loader_unlabelled, args)
 
-    with open('Data/Cub_new_model/train_dataset.pt', 'wb') as train_dataset_file:
-        pickle.dump(train_dataset, train_dataset_file, pickle.HIGHEST_PROTOCOL)
-    with open('Data/Cub_new_model/unlabelled_train_examples_test.pt', 'wb') as unlabelled_train_dataset_file:
-        pickle.dump(unlabelled_train_examples_test, unlabelled_train_dataset_file, pickle.HIGHEST_PROTOCOL)
-    with open('Data/Cub_new_model/test_dataset.pt', 'wb') as test_dataset_file:
-        pickle.dump(test_dataset, test_dataset_file, pickle.HIGHEST_PROTOCOL)
+    #with open('Data/try2/train_dataset.pt', 'wb') as train_dataset_file:
+    #    pickle.dump(train_dataset, train_dataset_file, pickle.HIGHEST_PROTOCOL)
+    #with open('Data/try2/unlabelled_train_examples_test.pt', 'wb') as unlabelled_train_dataset_file:
+    #    pickle.dump(unlabelled_train_examples_test, unlabelled_train_dataset_file, pickle.HIGHEST_PROTOCOL)
+    #with open('Data/try2/test_dataset.pt', 'wb') as test_dataset_file:
+    #    pickle.dump(test_dataset, test_dataset_file, pickle.HIGHEST_PROTOCOL)
     #shap_benchmark(model, train_dataset, unlabelled_train_examples_test)

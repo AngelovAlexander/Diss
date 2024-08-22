@@ -18,9 +18,13 @@ from evaluate_attention import *
 from itertools import combinations
 from data_split import create_folder
 from model import PatchClassifier, get_params_groups
+from output_model_SimGCD import OutputProjSimGCD
 import torch.nn.functional as F
 from sklearn.metrics.pairwise import cosine_similarity
 from torch.optim import SGD
+from sklearn.ensemble import RandomForestClassifier
+from torch.cuda.amp import autocast
+from sklearn.decomposition import PCA
 
 def prepare_attention_map(attn_weights, image_shape):
     average_attention = attn_weights.mean(dim=1) # Result is 197x197
@@ -33,42 +37,36 @@ def prepare_attention_map(attn_weights, image_shape):
     attention_map_resized = (attention_map_resized - attention_map_resized.min()) / (attention_map_resized.max() - attention_map_resized.min())
     return attention_map_resized
 
-def visualize_individual_attention(image, attn_weights, id, class_idx):
+def visualize_individual_attention(image, attn_weights, id, class_idx, dataset_name):
+    if dataset_name not in ["cub", "herb"]:
+        raise Exception("The dataset_name should be cub or herb!")
     image = np.transpose(image, (1, 2, 0))
 
-    #with open('results/craft_train_herb/try/attn_map_before_norm.pt', 'wb') as attn_map:
-    #    pickle.dump(attention_map_resized, attn_map, pickle.HIGHEST_PROTOCOL)
-
-    # Normalize the attention map
-    
-    #with open('results/craft_train_herb/try/img.pt', 'wb') as img_file:
-    #    pickle.dump(image, img_file, pickle.HIGHEST_PROTOCOL)
-    
-    #with open('results/craft_train_herb/try/attn_map.pt', 'wb') as attn_map:
-    #    pickle.dump(attention_map_resized, attn_map, pickle.HIGHEST_PROTOCOL)
-
-    # Apply threshold
-    #attention_map_resized[attention_map_resized > (attention_map_resized.min() + (attention_map_resized.min() / attention_map_resized.max()))] = 0
-
-    # Normalize the attention map
-    #attention_map_resized = (attention_map_resized - attention_map_resized.min()) / (attention_map_resized.max() - attention_map_resized.min())
-
+    if not os.path.isdir("results/train_" + dataset_name + "/Self-Attention/Study/" + str(class_idx)):
+        create_folder("results/train_" + dataset_name + "/Self-Attention/Study/" + str(class_idx))
+    plt.figure(figsize=(8, 8))
+    show(image)
+    plt.axis('off')
+    plt.show()
+    plt.savefig("results/train_" + dataset_name + "/Self-Attention/Study/" + str(class_idx) + "/img_" + str(id) + ".png")
+    plt.clf()
 
     plt.figure(figsize=(8, 8))
     show(image)
     plt.imshow(attn_weights, cmap='jet', alpha=0.5)  # 'jet' colormap, 50% transparency
-    plt.colorbar()
-    plt.title('Attention Map Overlay')
+    #plt.colorbar()
+    #plt.title('Attention Map Overlay')
+    
     plt.axis('off')
     plt.show()
-    if not os.path.isdir("results/train_herb/Self-Attention/Unlabeled/" + str(class_idx)):
-        create_folder("results/train_herb/Self-Attention/Unlabeled/" + str(class_idx))
-    plt.savefig("results/train_herb/Self-Attention/Unlabeled/" + str(class_idx) + "/attention_herb_last_" + str(id) + ".png")
+    #if not os.path.isdir("results/train_" + dataset_name + "/Self-Attention/Study/" + str(class_idx)):
+    #    create_folder("results/train_" + dataset_name + "/Self-Attention/Study/" + str(class_idx))
+    plt.savefig("results/train_" + dataset_name + "/Self-Attention/Study/" + str(class_idx) + "/attention_" + dataset_name + "_last_" + str(id) + ".png")
     plt.clf()
 
 def visualize_attention_patch(image, attention_maps, layer_idx):
     # Extract the attention map for the specified layer
-    attn_map = attention_maps[0]  # Take the first element of the batch
+    attn_map = attention_maps[0]  # Taking the first element of the batch
 
     # Assuming attention map shape is [num_heads, num_patches, num_patches]
     attn_map = attn_map.mean(dim=1)  # Average over heads
@@ -98,19 +96,64 @@ def visualize_attention_patch(image, attention_maps, layer_idx):
     plt.savefig("results/attention_special2_" + str(layer_idx) + ".png")
     plt.clf()
 
-def embed_patches_with_attention(train_classes, visualize=False):
+def embed_patches_with_hog(model, train_classes, dataset_name):
+    if dataset_name not in ["cub", "herb"]:
+        raise Exception("The dataset_name should be cub or herb!")
     dataset_labels = list(train_classes.keys())
     one_shot_train_data = []
     one_shot_train_label = []
-    print("Label")
-    print(dataset_labels[0])
 
-    print("random_padding")
+    all_embeddings = []
+    train_label = []
+    all_constraints = []
+    for i in range(len(dataset_labels)):
+        images = train_classes[dataset_labels[i]]
+        images = images.to("cuda")
+        images = images.requires_grad_(True)
+
+        cur_id = 0
+        constraints = []
+        embeddings = []
+
+        idx = 0
+
+        with torch.no_grad():
+            _ = model(images)
+            for img in images:
+                attn_weights = model[0].get_last_selfattention(img.unsqueeze(0))
+        
+                img = img.detach().cpu().numpy()
+                attn_map = prepare_attention_map(attn_weights, img.shape)
+                idx += 1
+                
+                patches = get_attended_patches(img, attn_map, threshold = 0.5, modification_type="resize", visualize = False)
+                cur_img_embeddings = create_embeddings(patches)
+                constraints.extend(list(combinations(np.arange(cur_id, cur_id + cur_img_embeddings.shape[0]), 2)))
+                cur_id += cur_img_embeddings.shape[0]
+                embeddings.append(cur_img_embeddings)
+        embeddings = np.vstack(embeddings)
+        
+        
+        all_constraints.extend(constraints)
+        train_label.append(np.full(embeddings.shape[0], dataset_labels[i]).flatten())
+        all_embeddings.append(embeddings)
+    all_embeddings = np.concatenate(all_embeddings, axis=0)
+    train_label = np.concatenate(train_label, axis=0)
+    
+    return all_embeddings, train_label, all_constraints
+
+def embed_patches_with_attention(model, train_classes, dataset_name, visualize=False):
+    if dataset_name not in ["cub", "herb"]:
+        raise Exception("The dataset_name should be cub or herb!")
+    dataset_labels = list(train_classes.keys())
+    one_shot_train_data = []
+    one_shot_train_label = []
+
     all_patches = []
     all_labels = []
+    q = 0
     for i in range(len(dataset_labels)):
-        images = train_classes[dataset_labels[i]]#dataset_labels[9]]#torch.stack(train_dataset[0][0])
-        #images = torch.stack(train_dataset[0][0])
+        images = train_classes[dataset_labels[i]]
         images = images.to("cuda")
         images = images.requires_grad_(True)
 
@@ -125,72 +168,60 @@ def embed_patches_with_attention(train_classes, visualize=False):
         with torch.no_grad():
             _ = model(images)
             for img in images:
+                q += 1
                 attn_weights = model[0].get_last_selfattention(img.unsqueeze(0))
                 attention_outputs.append(attn_weights)
         
                 img = img.detach().cpu().numpy()
                 attn_map = prepare_attention_map(attn_weights, img.shape)
                 if visualize:
-                    visualize_individual_attention(img, attn_map, idx, dataset_labels[i])
+                    visualize_individual_attention(img, attn_map, idx, dataset_labels[i], dataset_name)
                 idx += 1
                 
-                patches = get_attended_patches(img, attn_map, threshold = 0.4, modification_type="static_padding", visualize = False)
+                #patches = get_attended_patches(img, attn_map, threshold = 0.5, modification_type="resize", visualize = False)
+                patches = get_patches_with_fixed_size(img, attn_map, patch_size=(64, 64), threshold=0.5, visualize=False)
                 all_patches_per_class.append(patches)
-                #print(np.vstack(patches).shape)
                 #cur_img_embeddings = create_embeddings(patches)
                 #constraints.extend(list(combinations(np.arange(cur_id, cur_id + cur_img_embeddings.shape[0]), 2)))
                 #cur_id += cur_img_embeddings.shape[0]
-                #print(cur_img_embeddings.shape)
                 #embeddings.append(cur_img_embeddings)
         all_patches_per_class = np.vstack(all_patches_per_class)
-        #print(all_patches_per_class.shape)
-        random_idx = np.random.randint(all_patches_per_class.shape[0])
+        random_indices = np.random.choice(all_patches_per_class.shape[0], size=int(0.8 * all_patches_per_class.shape[0]), replace=False)
+        
+        # One random index
+        #random_idx = np.random.randint(all_patches_per_class.shape[0])
+        
         # Extract randomly one sample per class for training the 1 shot patch learning
-        one_shot_train_data.append(np.expand_dims(all_patches_per_class[random_idx], axis=0))
-        one_shot_train_label.append(dataset_labels[i])
-        all_patches_per_class = np.delete(all_patches_per_class, random_idx, axis=0)
-        #print(all_patches_per_class.shape)
+        one_shot_train_data.append(all_patches_per_class[random_indices])
+        one_shot_train_label.append(np.full(int(0.8 * all_patches_per_class.shape[0]), dataset_labels[i]).flatten())
+        mask = np.ones(all_patches_per_class.shape[0], dtype=bool)
+        mask[random_indices] = False
+        all_patches_per_class =all_patches_per_class[mask]
+        # One random index
+        #all_patches_per_class = np.delete(all_patches_per_class, random_idx, axis=0)
         all_patches.append(all_patches_per_class)
         all_labels.append(np.full(all_patches_per_class.shape[0], dataset_labels[i]).flatten())
     # Converting them into arrays
-    for p in all_patches:
-        print(p.shape)
     all_patches = np.concatenate(all_patches, axis=0)
     all_labels = np.concatenate(all_labels, axis=0)
     one_shot_train_data = np.vstack(one_shot_train_data)
-    one_shot_train_label = np.array(one_shot_train_label)
-    print(all_patches.shape, all_labels.shape, one_shot_train_data.shape, one_shot_train_label.shape)
+    # One random index
+    #one_shot_train_label = np.array(one_shot_train_label)
+    one_shot_train_label = np.concatenate(one_shot_train_label)
     return all_patches, all_labels, one_shot_train_data, one_shot_train_label
-    """
-    print(constraints)
-    print(cur_id)
-    embeddings = np.vstack(embeddings)
-    print(embeddings.shape)
-
-    labels = optimised_CoExDBSCAN(embeddings, eps=0.25, min_samples = 2, cannot_link_constraints = constraints)
-    print(labels.shape)
-    visualize_clusters(embeddings, labels)
-    print(f"Number of clusters: {len(set(labels)) - (1 if -1 in labels else 0)}")
-    print(f"Number of noise points: {np.sum(labels == -1)}")
-    ev = evaluate_optimised_CoExDBSCAN(embeddings, labels)
-    print(ev)
-    ev = evaluate_optimised_CoExDBSCAN(embeddings, labels, metric = "davies_bouldin_score")
-    print(ev)"""
 
 def classify_patches(model, patches):
     model.eval()
     with torch.no_grad():
         logits = model(patches)
-        print(logits)
         logits2 = logits.argmax(1).cpu().numpy()
-        print(logits2)
         probabilities = F.softmax(logits, dim=1)
         _, predicted = torch.max(probabilities, 1)
-    return predicted#[model.class_names[idx] for idx in predicted]
+    return predicted
 
 if __name__ == "__main__":
 
-    parser = argparse.ArgumentParser(description='shap_bnchmark', formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    parser = argparse.ArgumentParser(description='get_attention', formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument('--model_path', type=str)
     parser.add_argument('--train_dataset_path', type=str)
     parser.add_argument('--test_dataset_path', type=str)
@@ -228,10 +259,9 @@ if __name__ == "__main__":
     
     mlp_out_dim = len(labeled_classes) + len(unlabeled_classes)
     
-
     with open(args.train_dataset_path, 'rb') as tr_dataset:
         train_dataset = pickle.load(tr_dataset)
-
+    
     backbone = torch.hub.load('facebookresearch/dino:main', 'dino_vitb16')
     projector = DINOHeadNew(in_dim=feat_dim, out_dim=mlp_out_dim, nlayers=num_mlp_layers)
     model = nn.Sequential(backbone, projector).to(device)
@@ -241,38 +271,45 @@ if __name__ == "__main__":
     model.load_state_dict(state_dict["model"])
     model.eval()
     train_classes = divide_between_classes(train_dataset)
-    all_patches, all_labels, one_shot_train_data, one_shot_train_label = embed_patches_with_attention(train_classes)
-    patch_classifier = PatchClassifier(model)
-    #preds = []
-    patch_classifier.train()
-    params_groups = get_params_groups(patch_classifier)
-    optimizer = SGD(params_groups, lr=args.lr, momentum=args.momentum, weight_decay=args.weight_decay)
-    print("Test")
-    print(one_shot_train_data.shape[0])
-    img = one_shot_train_data
-    img = torch.from_numpy(img)
-    img = torch.from_numpy(np.transpose(img, (0, 3, 1, 2)))
-    img = img.cuda(non_blocking=True)
-    with torch.no_grad():
-        logits = patch_classifier(img)
-        loss = torch.nn.CrossEntropyLoss()(logits.argmax(1).cpu().numpy().item(), one_shot_train_label)
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
-        
+    
+    
+    all_patches, all_labels, one_shot_train_data, one_shot_train_label = embed_patches_with_attention(model, train_classes, args.dataset_name)
+    
+    
+    embeddings = []
+    embeddings_classifier = OutputProjSimGCD(model)#.to(device)
+    one_shot_train_data = torch.from_numpy(np.transpose(one_shot_train_data, (0, 3, 1, 2))).to(device)
+    one_shot_train_data = one_shot_train_data.requires_grad_(True)
+    batches = torch.split(one_shot_train_data, 64)
+    one_shot_train_label = torch.from_numpy(one_shot_train_label)
+    label_batches = torch.split(one_shot_train_label, 64)
+    torch.cuda.empty_cache()
+    for batch in batches:
+        with torch.no_grad():
+            a = embeddings_classifier(batch)
+        embeddings.append(a.cpu())
+    
+    embeddings = torch.cat(embeddings, dim=0)
+    classifier = RandomForestClassifier(n_estimators=200, random_state=2)
+    classifier.fit(embeddings, one_shot_train_label)
 
-    logits = patch_classifier(all_patches)
-    predicted_labels = logits.argmax(1).cpu().numpy()
-    correct = 0
+    all_patches = torch.from_numpy(np.transpose(all_patches, (0, 3, 1, 2))).to(device)
+    all_patches = all_patches.requires_grad_(True)
+    batches = torch.split(all_patches, 64)
+
+    all_patches_embeddings = []
+    for batch in batches:
+        with torch.no_grad():
+            a = embeddings_classifier(batch)
+        all_patches_embeddings.append(a.cpu())
+    all_patches_embeddings = torch.cat(all_patches_embeddings, dim=0)
+
+    predicted_labels = classifier.predict(all_patches_embeddings)
+
+    count = 0
     for i in range(all_labels.shape[0]):
-        if predicted_labels[i] == all_labels[i]:
-            correct += 1
-    print(correct)
-    print(correct/all_labels.shape[0])
-    #print(patches.shape)
-    """
-    patches = torch.from_numpy(np.transpose(patches, (0, 3, 1, 2)))
-    patches = patches.to("cuda")
-    patches = patches.requires_grad_(True)
-    results = classify_patches(patch_classifier, patches)
-    print(results)"""
+        if all_labels[i] == predicted_labels[i]:
+            count += 1
+    print(count, all_labels.shape[0])
+    print((count/all_labels.shape[0]) * 100)
+

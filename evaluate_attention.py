@@ -95,6 +95,92 @@ def counts_per_attention_interval(arr):
     counts, _ = np.histogram(arr, bins)
     return counts
 
+def get_patches_with_fixed_size(image, attn, patch_size=(64, 64), threshold=0.4, visualize=False):    
+    image = np.transpose(image, (1, 2, 0))
+    mask = attn > threshold
+    
+    # Label the clusters
+    labeled_image, num_features = label(mask)
+    
+    # Create a color map for visualization
+    cmap = plt.get_cmap('jet')
+    if visualize:
+        # Visualize the image
+        show(image, cmap=cmap)
+    
+    patches = []
+    mean_dict = {}
+    
+    patch_height, patch_width = patch_size
+    
+    # Loop through each cluster and find bounding boxes
+    for cluster_num in range(1, num_features + 1):
+        cluster_mask = labeled_image == cluster_num
+        coords = np.column_stack(np.where(cluster_mask))
+        
+        y_min, x_min = coords.min(axis=0)
+        y_max, x_max = coords.max(axis=0)
+        
+        # Determine the center of the cluster
+        y_center, x_center = coords.mean(axis=0).astype(int)
+        
+        # Calculate the patch boundaries centered on the most attended area
+        y_start = max(y_center - patch_height // 2, 0)
+        y_end = min(y_start + patch_height, image.shape[0])
+        x_start = max(x_center - patch_width // 2, 0)
+        x_end = min(x_start + patch_width, image.shape[1])
+
+        # Adjust start and end positions if the patch goes out of bounds
+        if y_end - y_start < patch_height:
+            y_start = max(y_end - patch_height, 0)
+        if x_end - x_start < patch_width:
+            x_start = max(x_end - patch_width, 0)
+        
+        # Extract the patch
+        small_patch = image[y_start:y_end, x_start:x_end]
+        
+        # Normalize the patch
+        small_patch -= small_patch.min()
+        small_patch /= small_patch.max()
+
+        # Getting the mean of the 16 most attended pixels for ranking patches
+        mean = np.mean(np.sort(small_patch.flatten())[-16:])
+        small_patch = cv2.resize(small_patch, (224,224), interpolation=cv2.INTER_LINEAR)
+        
+        if num_features > 5:
+            if mean in mean_dict:
+                mean_dict[mean] = np.vstack([mean_dict[mean], np.expand_dims(small_patch, axis=0)])
+            else:
+                mean_dict[mean] = np.expand_dims(small_patch, axis=0)
+        else:
+            patches.append(np.expand_dims(small_patch, axis=0))
+
+        if visualize:
+            # Draw rectangle around each cluster
+            rect = plt.Rectangle((x_start, y_start), x_end - x_start, y_end - y_start,
+                                 edgecolor='green', facecolor='none')
+            plt.gca().add_patch(rect)
+    
+    if visualize:
+        plt.axis('off')
+        plt.show()
+        plt.savefig("results/attention_with_patches2.png")
+        plt.clf()
+    
+    sorted_means = sorted(mean_dict.keys())
+    available_patches = 5
+    if num_features > 5:
+        while available_patches > 0:
+            cur_patch = mean_dict[sorted_means.pop(-1)]
+            if available_patches - cur_patch.shape[0] < 0:
+                patches.append(cur_patch[:available_patches])
+            else:
+                patches.append(cur_patch)
+            available_patches -= cur_patch.shape[0]
+    
+    patches = np.vstack(patches)
+    return patches
+
 def get_attended_patches(image, attn, threshold = 0.4, modification_type="random_padding", visualize = False):
     if modification_type not in ["resize", "static_padding", "random_padding"]:
         raise Exception("The modification type needs to be resize, static_padding or random_padding!")

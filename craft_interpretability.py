@@ -26,6 +26,7 @@ def show(img, ax = None, **kwargs):
     if img.shape[0] == 3:
         img = img.transpose(1, 2, 0)
 
+    img = img.astype(np.float64)
     img -= img.min();img /= img.max()
     if ax:
       ax.imshow(img, **kwargs); ax.axis('off')
@@ -63,30 +64,16 @@ def plot_legend(cmaps, most_important_concepts, crops, crops_u):
     best_crops_id = np.argsort(crops_u[:, c_id])[::-1][0]
     best_crop = crops[best_crops_id]
 
-    p = 5
-    mask = np.zeros(best_crop.shape[:-1])
-    mask[:p, :] = 1.0
-    mask[:, :p] = 1.0
-    mask[-p:, :] = 1.0
-    mask[:, -p:] = 1.0
-
     show(best_crop)
-    show(mask, cmap=cmap)
-    plt.title(f"{c_id}", color=cmap(1.0))
 
+    plt.tight_layout()
     plt.show()
+
 
 def concept_attribution_maps(images_preprocessed, images_u, cmaps, most_important_concepts, id, percentile=30):
     img = images_preprocessed[id]
-    #n = images_preprocessed.shape[0]
-    #r = images_u.shape[1]
-    #w = h = int(np.sqrt(images_u.shape[0] // n))
-    #print(n, r, w, h)
-    #images_u = images_u.reshape((n,w,h,r))
     u = images_u[id]
-    #print(u.shape)
     img = img.detach().cpu().numpy()
-    #print("Shape ", img.shape)
 
     show(img)
 
@@ -100,7 +87,6 @@ def concept_attribution_maps(images_preprocessed, images_u, cmaps, most_importan
         heatmap = heatmap * np.array(heatmap > sigma, np.float32)
 
         heatmap_reshaped = np.full((img.shape[1], img.shape[2]), heatmap)
-        #heatmap = cv2.resize(heatmap, (224, 224))
         show(heatmap_reshaped, cmap=cmap, alpha=0.7)
 
     plt.show()
@@ -109,7 +95,7 @@ def concept_attribution_maps2(images_preprocessed, images_u, cmaps, most_importa
     img = images_preprocessed[id]
     u = images_u[id]  # u is 1-dimensional for each image
 
-    # Get image dimensions
+    # Image dimensions
     _, height, width = img.shape
 
     plt.figure(figsize=(12, 6))
@@ -130,10 +116,10 @@ def concept_attribution_maps2(images_preprocessed, images_u, cmaps, most_importa
     for i, c_id in enumerate(most_important_concepts):
         concept_importance = u[c_id]
 
-        # only show concept if excess N-th percentile
+        # Showing concept if excess N-th percentile
         sigma = np.percentile(images_u[:, c_id], percentile)
         if concept_importance > sigma:
-            # Create a heatmap for this concept
+            # Creating a heatmap
             heatmap = np.full((height, width), concept_importance)
             combined_heatmap += heatmap
 
@@ -141,9 +127,9 @@ def concept_attribution_maps2(images_preprocessed, images_u, cmaps, most_importa
     if combined_heatmap.max() > 0:
         combined_heatmap = combined_heatmap / combined_heatmap.max()
 
-    # Apply colormap
+    # Applying colormap
     heatmap_colored = plt.cm.jet(combined_heatmap)
-    heatmap_colored[..., 3] = combined_heatmap * 0.5  # Adjust alpha
+    heatmap_colored[..., 3] = combined_heatmap * 0.5
 
     plt.imshow(heatmap_colored)
     plt.axis('off')
@@ -155,7 +141,7 @@ def craft_interpretability(model, train_dataset, test_dataset, dataset_name, plo
     model = model.to("cuda")
     class_id = None
     proj = OutputProjSimGCD(model)
-    last_layer = nn.utils.weight_norm(nn.Linear(256, out_dim, bias=False)) ### Change in_dim as 256
+    last_layer = nn.utils.weight_norm(nn.Linear(256, out_dim, bias=False))
     last_layer.weight_g.data.fill_(1)
     if norm_last_layer:
         last_layer.weight_g.requires_grad = False
@@ -168,11 +154,19 @@ def craft_interpretability(model, train_dataset, test_dataset, dataset_name, plo
               batch_size=patch_size)
 
     dataset_labels = list(train_dataset.keys())#[:1]
-    if not os.path.isdir("results/craft_train_" + dataset_name):
-        create_folder("results/craft_train_" + dataset_name)
+    if not os.path.isdir("results/train_" + dataset_name + "/Craft"):
+        create_folder("results/train_" + dataset_name + "/Craft")
 
-    if not os.path.isdir("results/craft_train_" + dataset_name + "/" + str(patch_size)):
-        create_folder("results/craft_train_" + dataset_name + "/" + str(patch_size))
+    if not os.path.isdir("results/train_" + dataset_name + "/Craft/" + str(patch_size)):
+        create_folder("results/train_" + dataset_name + "/Craft/" + str(patch_size))
+    
+    cmaps = [
+        get_alpha_cmap((54, 197, 240)),
+        get_alpha_cmap((210, 40, 95)),
+        get_alpha_cmap((236, 178, 46)),
+        get_alpha_cmap((15, 157, 88)),
+        get_alpha_cmap((84, 25, 85))
+    ]
 
     for i in range(len(dataset_labels)):
         class_dataset = train_dataset[dataset_labels[i]]
@@ -184,10 +178,12 @@ def craft_interpretability(model, train_dataset, test_dataset, dataset_name, plo
 
         importances = craft.estimate_importance(class_dataset, class_id=dataset_labels[i])
         images_u = craft.transform(class_dataset)
+        plt.figure(figsize=(10, 10))
         plt.bar(range(len(importances)), importances)
         plt.xticks(range(len(importances)))
         plt.title("Concept Importance")
-        plt.savefig("results/craft_train_" + dataset_name + "/" + str(patch_size) + "/" + plot_name + "_concept_importance_class_" + str(dataset_labels[i]) + ".png")
+        plt.tight_layout()
+        plt.savefig("results/train_" + dataset_name + "/Craft/" + str(patch_size) + "/" + plot_name + "_concept_importance_class_" + str(dataset_labels[i]) + ".png")
         plt.clf()
 
         most_important_concepts = np.argsort(importances)[::-1][:5]
@@ -200,34 +196,29 @@ def craft_interpretability(model, train_dataset, test_dataset, dataset_name, plo
             for j in range(nb_crops):
                 plt.subplot(ceil(nb_crops/5), 5, j+1)
                 show(best_crops[j])
-            plt.savefig("results/craft_train_" + dataset_name + "/" + str(patch_size) + "/" + plot_name + "_concept_" + str(c_id) + "_class_" + str(dataset_labels[i]) + ".png")
+            plt.tight_layout()
+            plt.savefig("results/train_" + dataset_name + "/Craft/" + str(patch_size) + "/" + plot_name + "_concept_" + str(c_id) + "_class_" + str(dataset_labels[i]) + ".png")
             plt.clf()
     
-    cmaps = [
-        get_alpha_cmap((54, 197, 240)),
-        get_alpha_cmap((210, 40, 95)),
-        get_alpha_cmap((236, 178, 46)),
-        get_alpha_cmap((15, 157, 88)),
-        get_alpha_cmap((84, 25, 85))
-    ]
-    plot_legend(cmaps, most_important_concepts, crops, crops_u)
-    plt.savefig("results/craft_train_" + dataset_name + "/" + str(patch_size) + "/" + plot_name + "_legend_" + str(dataset_labels[i]) + ".png")
-    plt.clf()
-    concept_attribution_maps2(class_dataset, images_u, cmaps, most_important_concepts, 0)
-    plt.show()
-    plt.savefig("results/craft_train_" + dataset_name + "/" + str(patch_size) + "/" + plot_name + "_map0_" + str(dataset_labels[i]) + ".png")
-    plt.clf()
-    concept_attribution_maps2(class_dataset, images_u, cmaps, most_important_concepts, 1)
-    plt.show()
-    plt.savefig("results/craft_train_" + dataset_name + "/" + str(patch_size) + "/" + plot_name + "_map1_" + str(dataset_labels[i]) + ".png")
-    plt.clf()
-    concept_attribution_maps2(class_dataset, images_u, cmaps, most_important_concepts, 2)
-    plt.savefig("results/craft_train_" + dataset_name + "/" + str(patch_size) + "/" + plot_name + "_map2_" + str(dataset_labels[i]) + ".png")
-    plt.clf()
+    
+        plot_legend(cmaps, most_important_concepts, crops, crops_u)
+        plt.savefig("results/train_" + dataset_name + "/Craft/" + str(patch_size) + "/" + plot_name + "_legend_" + str(dataset_labels[i]) + ".png")
+        plt.clf()
+        #concept_attribution_maps2(class_dataset, images_u, cmaps, most_important_concepts, 0)
+        #plt.show()
+        #plt.savefig("results/train_" + dataset_name + "/Craft/" + str(patch_size) + "/" + plot_name + "_map0_" + str(dataset_labels[i]) + ".png")
+        #plt.clf()
+        #concept_attribution_maps2(class_dataset, images_u, cmaps, most_important_concepts, 1)
+        #plt.show()
+        #plt.savefig("results/train_" + dataset_name + "/Craft/" + str(patch_size) + "/" + plot_name + "_map1_" + str(dataset_labels[i]) + ".png")
+        #plt.clf()
+        #concept_attribution_maps2(class_dataset, images_u, cmaps, most_important_concepts, 2)
+        #plt.savefig("results/train_" + dataset_name + "/Craft/" + str(patch_size) + "/" + plot_name + "_map2_" + str(dataset_labels[i]) + ".png")
+        #plt.clf()
 
 if __name__ == "__main__":
 
-    parser = argparse.ArgumentParser(description='shap_bnchmark', formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    parser = argparse.ArgumentParser(description='craft_interpretability', formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument('--model_path', type=str)
     parser.add_argument('--train_dataset_path', type=str)
     parser.add_argument('--test_dataset_path', type=str)
@@ -277,11 +268,8 @@ if __name__ == "__main__":
     
     model.load_state_dict(state_dict["model"])
     model.eval()
-    print(state_dict.keys())
-    for a,b in model.named_parameters():
-        print(a)
     
 
     train_classes = divide_between_classes(train_dataset)
-    test_classes = divide_between_classes(test_dataset)
-    craft_interpretability(model, train_classes, test_classes, args.dataset_name, args.shap_image_plot_name, feat_dim, mlp_out_dim, args.patch_size)
+    #test_classes = divide_between_classes(test_dataset)
+    craft_interpretability(model, train_classes, test_dataset, args.dataset_name, args.shap_image_plot_name, feat_dim, mlp_out_dim, args.patch_size)

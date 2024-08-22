@@ -35,57 +35,25 @@ def divide_between_classes(dataset):
 def shap_benchmark(model, train_dataset, test_dataset, plot_name):
     model = model.to("cuda")
     output_model = OutputSimGCD(model)
-    #a = torch.stack(train_dataset[0][0])
-    #q = torch.stack(train_dataset[1][0])
-    #c = torch.cat([a,q])
     c1 = train_dataset[list(train_dataset.keys())[4]]
-    #c2 = train_dataset[list(train_dataset.keys())[7]][:1]
-    #c3 = train_dataset[list(train_dataset.keys())[18]][:3]
-    #c4 = train_dataset[list(train_dataset.keys())[52]][:3]
-    #c5 = train_dataset[list(train_dataset.keys())[1]][:3]
-    #c6 = train_dataset[list(train_dataset.keys())[63]][:3]
-    #c7 = train_dataset[list(train_dataset.keys())[23]][:3]
-    c = c1#'torch.cat([c1, c2])#, c3, c4, c5, c6, c7])
     c = c.to("cuda")
     c = c.requires_grad_(True)
-    #a = a.to("cuda")
-    #a = a.requires_grad_(True)
-    #b = a.detach().clone()
-    #print(c)
-    #print(c.shape)
     output_model.to("cuda")
     e = shap.DeepExplainer(output_model, c)
-    #t_d_1 = test_dataset[0][0].unsqueeze(0)
-    #t_d_2 = test_dataset[50][0].unsqueeze(0)
     d = train_dataset[list(train_dataset.keys())[7]][0].unsqueeze(0)
     d = d.to("cuda")
     d = d.requires_grad_(True)
-    #t_d = torch.cat([t_d_1,t_d_2])
-    #t_d = t_d.to("cuda")
-    #t_d = t_d.requires_grad_(True)
     y = d.detach().clone()
     y = y.detach().cpu().numpy()
     y = y.transpose(0,2,3,1)
     shap_values = e.shap_values(c, check_additivity=False)
-    print(shap_values.shape)
     category_shap_values = np.mean(shap_values[0], axis=0)
-    print("Start")
-    print(c.shape)
-    print(category_shap_values.shape)
-    print(category_shap_values[1].shape)
-    #shap.summary_plot(category_shap_values)
-    #shap_numpy = list(np.transpose(shap_values, (4, 0, 2, 3, 1)))
-
-    #shap_values = [shap_values[i, 0] for i in range(shap_values.shape[0])]
-    #shap.image_plot(shap_values, -y[0])
 
     num_images_to_show = 5
     images_to_show = c[:num_images_to_show]
     images_to_show = images_to_show.detach().cpu().numpy()
     images_to_show = images_to_show.transpose(0,2,3,1)
-    print(category_shap_values[:2].shape)
     shap_values_to_show = category_shap_values
-    #shap_values_to_show = [category_shap_values[:num_images_to_show].transpose((4, 0, 2, 3, 1))]
 
     # Use shap.image_plot to visualize the SHAP values on the images
     shap.image_plot(shap_values_to_show, images_to_show[0])
